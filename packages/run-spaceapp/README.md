@@ -67,7 +67,7 @@ when measurable and its availability is reported.
 SpaceApp supports both Docker and rootless Podman as container engines:
 
 - **Docker** (default): Docker Engine or Docker Desktop on Linux, macOS, and Windows.
-- **Rootless Podman**: Podman 5 or newer with `podman-compose` on Linux and macOS.
+- **Rootless Podman**: Podman 5 or newer with Compose support (`podman compose version`) on Linux and macOS.
 
 To install with Podman:
 

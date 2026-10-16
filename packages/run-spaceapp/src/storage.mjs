@@ -110,7 +110,7 @@ export async function inspectStoragePlan({ root, config, existingConfig, resourc
   let sharedLayersEstimated = false;
   for (const [type, image] of images) {
     const cached = await captureProbe(execute, { command: engineName, args: ["image", "inspect", "--format", "{{.Id}}", image] });
-    if (!/^sha256:[a-f0-9]{64}$/.test(cached ?? "")) {
+    if (!/^(sha256:)?[a-f0-9]{64}$/.test(cached ?? "")) {
       missingImages.push(image);
       let reserve = imageReserve[type] ?? GiB;
       if (engine && existingConfig && cachedLayers.size && typeof fetch === "function") {
@@ -141,16 +141,18 @@ export async function inspectStoragePlan({ root, config, existingConfig, resourc
     const { inspectSystemResources } = await import("./index.mjs");
     try { dockerFreeDiskBytes = (await inspectSystemResources(storageRootDir)).freeDiskBytes; } catch {}
   }
-  // On macOS with Podman, measure the virtual machine disk capacity.
+  // On macOS with Podman, probe available space inside the selected machine.
   if (engineName === "podman" && process.platform === "darwin" && dockerFreeDiskBytes === null) {
     try {
-      const machineRaw = await captureProbe(execute, { command: "podman", args: ["machine", "inspect"] });
-      if (machineRaw) {
-        const parsed = JSON.parse(machineRaw);
-        const machine = Array.isArray(parsed) ? parsed.find((m) => m.Running || m.State === "running") || parsed[0] : parsed;
-        const disk = machine?.Resources?.DiskSize ?? machine?.DiskSize;
-        if (typeof disk === "number" && disk > 0) {
-          dockerFreeDiskBytes = disk < 10000 ? disk * 1024 ** 3 : disk;
+      const dfOutput = await captureProbe(execute, { command: "podman", args: ["machine", "ssh", "df -k /var/lib/containers/storage 2>/dev/null || df -k /"] });
+      if (dfOutput) {
+        const lines = dfOutput.trim().split(/\r?\n/);
+        if (lines.length > 1) {
+          const parts = lines[1].trim().split(/\s+/);
+          const availableKb = Number(parts[3]);
+          if (!Number.isNaN(availableKb) && availableKb > 0) {
+            dockerFreeDiskBytes = availableKb * 1024;
+          }
         }
       }
     } catch {}

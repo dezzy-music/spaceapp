@@ -353,11 +353,8 @@ test("inspectStoragePlan measures Podman machine capacity on macOS", async () =>
   const root = await mkdtemp(join(tmpdir(), "spaceapp-storage-podman-mac-"));
   const config = createDefaultConfig({ version: "1.0.0", engine: "podman", profile: "small" });
   const execute = async (spec, io) => {
-    if (spec.command === "podman" && spec.args?.[0] === "machine" && spec.args?.[1] === "inspect") {
-      io.stdout.write(JSON.stringify([{
-        Running: true,
-        Resources: { CPUs: 8, Memory: 16384, DiskSize: 64 }
-      }]));
+    if (spec.command === "podman" && spec.args?.[0] === "machine" && spec.args?.[1] === "ssh") {
+      io.stdout.write("Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/vda4 67108864 1048576 66060288 2% /var/lib/containers/storage\n");
       return 0;
     }
     if (spec.command === "podman" && spec.args?.[0] === "info") {
@@ -381,9 +378,127 @@ test("inspectStoragePlan measures Podman machine capacity on macOS", async () =>
       execute,
       operation: "fresh"
     });
-    assert.equal(plan.dockerFreeDiskBytes, 64 * 1024 ** 3);
+    assert.equal(plan.dockerFreeDiskBytes, 66060288 * 1024);
     assert.equal(plan.resources.engineCpuCount, 8);
   } finally {
     Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
   }
 });
+
+test("doctor inspects podman engine when config.json specifies engine: podman", async () => {
+  const root = await mkdtemp(join(tmpdir(), "spaceapp-doctor-podman-"));
+  const stdout = capture();
+  const stderr = capture();
+  const calls = [];
+
+  await writeFile(
+    join(root, "config.json"),
+    JSON.stringify(createDefaultConfig({ version: "1.0.0", engine: "podman", profile: "small" })),
+    "utf8"
+  );
+
+  const options = {
+    env: { SPACEAPP_HOME: root },
+    platform: "linux",
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    inspectResources: async () => ({
+      cpuCount: 8,
+      totalMemoryBytes: 16 * 1024 ** 3,
+      freeDiskBytes: 100 * 1024 ** 3
+    }),
+    execute: async (spec) => {
+      calls.push(spec);
+      return 0;
+    }
+  };
+
+  const code = await run(["doctor"], options);
+  assert.equal(code, 0);
+  assert.match(stdout.value(), /podman/i);
+  assert.ok(calls.some((c) => c.command === "podman"));
+});
+
+test("reinstall --engine podman updates engine and invokes podman compose down and up", async () => {
+  const root = await mkdtemp(join(tmpdir(), "spaceapp-reinstall-podman-"));
+  const stdout = capture();
+  const stderr = capture();
+  const calls = [];
+
+  await writeFile(
+    join(root, "config.json"),
+    JSON.stringify(createDefaultConfig({ version: "1.0.0", engine: "docker", profile: "small" })),
+    "utf8"
+  );
+
+  const options = {
+    env: { SPACEAPP_HOME: root },
+    platform: "linux",
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    stdin: ttyStdin("y"),
+    request: async (url) => new Response(JSON.stringify(url.endsWith("/readyz") ? { ok: true } : { setupRequired: true, expiresAt: "2099-07-23T12:15:00.000Z" }), { status: 200, headers: { "content-type": "application/json" } }),
+    sleep: async () => {},
+    execute: async (spec) => {
+      calls.push(spec);
+      return 0;
+    }
+  };
+
+  const code = await run(["reinstall", "--engine", "podman"], options);
+  assert.equal(code, 0);
+
+  const updated = JSON.parse(await readFile(join(root, "config.json"), "utf8"));
+  assert.equal(updated.engine, "podman");
+
+  const downCall = calls.find((c) => c.command === "podman" && c.args?.includes("down"));
+  assert.ok(downCall, "podman compose down should be called");
+
+  const upCall = calls.find((c) => c.command === "podman" && c.args?.includes("up"));
+  assert.ok(upCall, "podman compose up should be called");
+});
+
+test("interactive install selects podman engine via answers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "spaceapp-interactive-podman-"));
+  const stdout = capture();
+  const stderr = capture();
+  const calls = [];
+
+  const options = {
+    env: { SPACEAPP_HOME: root },
+    platform: "linux",
+    stdout: stdout.stream,
+    stderr: stderr.stream,
+    inspectResources: async () => ({
+      cpuCount: 8,
+      totalMemoryBytes: 16 * 1024 ** 3,
+      freeDiskBytes: 100 * 1024 ** 3
+    }),
+    request: async (url) => new Response(JSON.stringify(url.endsWith("/readyz") ? { ok: true } : { setupRequired: false, expiresAt: null }), { status: 200, headers: { "content-type": "application/json" } }),
+    sleep: async () => {},
+    ensurePodman: async () => ({ code: 0, reexecuted: false }),
+    execute: async (spec) => {
+      calls.push(spec);
+      return 0;
+    }
+  };
+
+  const code = await run([
+    "install",
+    "--non-interactive",
+    "--answers",
+    JSON.stringify({
+      confirm: true,
+      profile: "small",
+      access: "isolated",
+      engine: "podman",
+      companions: false,
+      telemetry: false,
+      open: false
+    })
+  ], options);
+  assert.equal(code, 0);
+  const config = JSON.parse(await readFile(join(root, "config.json"), "utf8"));
+  assert.equal(config.engine, "podman");
+});
+

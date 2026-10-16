@@ -113,10 +113,16 @@ jobs:
             --purge-data \
             --non-interactive \
             --answers '{"confirm":"DELETE"}'
-          RUNNING="$(podman ps -q)"
-          if [ -n "$RUNNING" ]; then
-            echo "Unexpected running Podman containers: $RUNNING" >&2
+          CONTAINERS="$(podman ps -aq)"
+          if [ -n "$CONTAINERS" ]; then
+            echo "Unexpected remaining Podman containers: $CONTAINERS" >&2
             podman ps -a >&2
+            exit 1
+          fi
+          VOLUMES="$(podman volume ls -q)"
+          if [ -n "$VOLUMES" ]; then
+            echo "Unexpected remaining Podman volumes: $VOLUMES" >&2
+            podman volume ls >&2
             exit 1
           fi
 
