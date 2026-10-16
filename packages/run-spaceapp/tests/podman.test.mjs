@@ -419,11 +419,10 @@ test("doctor inspects podman engine when config.json specifies engine: podman", 
   assert.ok(calls.some((c) => c.command === "podman"));
 });
 
-test("reinstall --engine podman updates engine and invokes podman compose down and up", async () => {
+test("reinstall --engine refuses switching engines on existing installation with migration guidance", async () => {
   const root = await mkdtemp(join(tmpdir(), "spaceapp-reinstall-podman-"));
   const stdout = capture();
   const stderr = capture();
-  const calls = [];
 
   await writeFile(
     join(root, "config.json"),
@@ -437,25 +436,16 @@ test("reinstall --engine podman updates engine and invokes podman compose down a
     stdout: stdout.stream,
     stderr: stderr.stream,
     stdin: ttyStdin("y"),
-    request: async (url) => new Response(JSON.stringify(url.endsWith("/readyz") ? { ok: true } : { setupRequired: true, expiresAt: "2099-07-23T12:15:00.000Z" }), { status: 200, headers: { "content-type": "application/json" } }),
-    sleep: async () => {},
-    execute: async (spec) => {
-      calls.push(spec);
-      return 0;
-    }
+    execute: async () => 0
   };
 
-  const code = await run(["reinstall", "--engine", "podman"], options);
-  assert.equal(code, 0);
+  await assert.rejects(
+    () => run(["reinstall", "--engine", "podman"], options),
+    /Switching container engine from "docker" to "podman" is not supported/
+  );
 
-  const updated = JSON.parse(await readFile(join(root, "config.json"), "utf8"));
-  assert.equal(updated.engine, "podman");
-
-  const downCall = calls.find((c) => c.command === "podman" && c.args?.includes("down"));
-  assert.ok(downCall, "podman compose down should be called");
-
-  const upCall = calls.find((c) => c.command === "podman" && c.args?.includes("up"));
-  assert.ok(upCall, "podman compose up should be called");
+  const unmodified = JSON.parse(await readFile(join(root, "config.json"), "utf8"));
+  assert.equal(unmodified.engine, "docker");
 });
 
 test("interactive install selects podman engine via answers", async () => {

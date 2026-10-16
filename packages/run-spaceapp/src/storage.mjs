@@ -84,7 +84,7 @@ async function registryLayers(image, arch, fetch) {
   return { layers: manifest.layers, diffIds: config.rootfs?.diff_ids };
 }
 
-export async function inspectStoragePlan({ root, config, existingConfig, resources, execute, operation, fetch = globalThis.fetch }) {
+export async function inspectStoragePlan({ root, config, existingConfig, resources, execute, operation, platform = process.platform, fetch = globalThis.fetch }) {
   const engineName = config.engine || "docker";
   const dockerInfo = await captureProbe(execute, { command: engineName, args: ["info", "--format", "{{json .}}"] });
   let engine = null;
@@ -137,12 +137,12 @@ export async function inspectStoragePlan({ root, config, existingConfig, resourc
   }
   // Linux can measure the engine storage filesystem directly even on a fresh install.
   const storageRootDir = engine?.DockerRootDir || engine?.store?.graphRoot;
-  if (storageRootDir && process.platform === "linux") {
+  if (storageRootDir && platform === "linux") {
     const { inspectSystemResources } = await import("./index.mjs");
     try { dockerFreeDiskBytes = (await inspectSystemResources(storageRootDir)).freeDiskBytes; } catch {}
   }
   // On macOS with Podman, probe available space inside the selected machine.
-  if (engineName === "podman" && process.platform === "darwin" && dockerFreeDiskBytes === null) {
+  if (engineName === "podman" && platform === "darwin" && dockerFreeDiskBytes === null) {
     try {
       const dfOutput = await captureProbe(execute, { command: "podman", args: ["machine", "ssh", "df -k /var/lib/containers/storage 2>/dev/null || df -k /"] });
       if (dfOutput) {
@@ -157,7 +157,7 @@ export async function inspectStoragePlan({ root, config, existingConfig, resourc
       }
     } catch {}
   }
-  return { ...plan, missingImages, sharedLayersEstimated, dockerFreeDiskBytes,
+  return { ...plan, engineName, platform, missingImages, sharedLayersEstimated, dockerFreeDiskBytes,
     resources: { ...resources,
       freeDiskBytes: dockerFreeDiskBytes === null ? resources.freeDiskBytes : Math.min(resources.freeDiskBytes, dockerFreeDiskBytes),
       engineCpuCount: engine?.NCPU ?? engine?.host?.cpus,
@@ -170,6 +170,8 @@ export function storageChecks(plan, resources) {
     detail: `${gib(resources.freeDiskBytes)} GiB available; ${gib(plan.requiredDiskBytes)} GiB required additionally for ${plan.operation} (images ${gib(plan.missingImageBytes)}, checkpoint ${gib(plan.checkpointBytes)}, reserve 0.5)` }];
   if (plan.dockerFreeDiskBytes !== null) checks.push({ name: "Docker storage", ok: plan.dockerFreeDiskBytes >= plan.requiredDiskBytes,
     detail: `${gib(plan.dockerFreeDiskBytes)} GiB available; ${gib(plan.requiredDiskBytes)} GiB required additionally` });
+  else if (plan.engineName === "podman" && plan.platform === "darwin") checks.push({ name: "Docker storage", ok: false,
+    detail: "Selected Podman machine disk capacity unavailable; cannot verify additional storage" });
   else checks.push({ name: "Docker storage", ok: true, detail: "Separate engine disk capacity unavailable; host estimate used. Docker ENOSPC will stop the operation before cutover." });
   return checks;
 }
