@@ -17,6 +17,7 @@ import {
   detectAvailableEngines,
   podmanIsReady
 } from "../src/prerequisites.mjs";
+import { inspectStoragePlan } from "../src/storage.mjs";
 
 function capture() {
   let value = "";
@@ -346,4 +347,43 @@ test("factory-reset preserves configured engine", async () => {
 
   const resetConfig = JSON.parse(await readFile(join(root, "config.json"), "utf8"));
   assert.equal(resetConfig.engine, "podman");
+});
+
+test("inspectStoragePlan measures Podman machine capacity on macOS", async () => {
+  const root = await mkdtemp(join(tmpdir(), "spaceapp-storage-podman-mac-"));
+  const config = createDefaultConfig({ version: "1.0.0", engine: "podman", profile: "small" });
+  const execute = async (spec, io) => {
+    if (spec.command === "podman" && spec.args?.[0] === "machine" && spec.args?.[1] === "inspect") {
+      io.stdout.write(JSON.stringify([{
+        Running: true,
+        Resources: { CPUs: 8, Memory: 16384, DiskSize: 64 }
+      }]));
+      return 0;
+    }
+    if (spec.command === "podman" && spec.args?.[0] === "info") {
+      io.stdout.write(JSON.stringify({
+        host: { cpus: 8, memTotal: 16 * 1024 ** 3 },
+        store: { graphRoot: "/var/lib/containers/storage" }
+      }));
+      return 0;
+    }
+    return 0;
+  };
+
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+  try {
+    const plan = await inspectStoragePlan({
+      root,
+      config,
+      existingConfig: null,
+      resources: { cpuCount: 8, totalMemoryBytes: 16 * 1024 ** 3, freeDiskBytes: 100 * 1024 ** 3 },
+      execute,
+      operation: "fresh"
+    });
+    assert.equal(plan.dockerFreeDiskBytes, 64 * 1024 ** 3);
+    assert.equal(plan.resources.engineCpuCount, 8);
+  } finally {
+    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+  }
 });

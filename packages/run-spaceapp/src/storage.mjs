@@ -141,6 +141,20 @@ export async function inspectStoragePlan({ root, config, existingConfig, resourc
     const { inspectSystemResources } = await import("./index.mjs");
     try { dockerFreeDiskBytes = (await inspectSystemResources(storageRootDir)).freeDiskBytes; } catch {}
   }
+  // On macOS with Podman, measure the virtual machine disk capacity.
+  if (engineName === "podman" && process.platform === "darwin" && dockerFreeDiskBytes === null) {
+    try {
+      const machineRaw = await captureProbe(execute, { command: "podman", args: ["machine", "inspect"] });
+      if (machineRaw) {
+        const parsed = JSON.parse(machineRaw);
+        const machine = Array.isArray(parsed) ? parsed.find((m) => m.Running || m.State === "running") || parsed[0] : parsed;
+        const disk = machine?.Resources?.DiskSize ?? machine?.DiskSize;
+        if (typeof disk === "number" && disk > 0) {
+          dockerFreeDiskBytes = disk < 10000 ? disk * 1024 ** 3 : disk;
+        }
+      }
+    } catch {}
+  }
   return { ...plan, missingImages, sharedLayersEstimated, dockerFreeDiskBytes,
     resources: { ...resources,
       freeDiskBytes: dockerFreeDiskBytes === null ? resources.freeDiskBytes : Math.min(resources.freeDiskBytes, dockerFreeDiskBytes),
