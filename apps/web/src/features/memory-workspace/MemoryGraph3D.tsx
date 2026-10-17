@@ -95,7 +95,6 @@ export function MemoryGraph3D({
     }
 
     const labelsCtx = labelsCanvas.getContext("2d");
-    const fallbackCtx = (!renderer) ? canvas.getContext("2d") : null;
 
     const pointers = new Map<number, { x: number; y: number }>();
     let dragged = false;
@@ -120,13 +119,16 @@ export function MemoryGraph3D({
       const { nodes, edges, positions, coordinates, showTitles, selectedNodeId } = current.current;
       const focus = hover ?? selectedNodeId;
 
-      // Calculate spatial bounds and camera scale
-      const coordValues = [...coordinates.values()];
-      const extent = Math.max(60, ...coordValues.map(p => Math.hypot(p.x, p.y, p.z)));
+      // Calculate spatial bounds and camera scale with loop to avoid stack overflow at 50k nodes
+      let extent = 60;
+      for (const p of coordinates.values()) {
+        const d = Math.hypot(p.x, p.y, p.z);
+        if (d > extent) extent = d;
+      }
       const scale = Math.min(width, height) * 0.4 / extent;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-      if (renderer && gl && !gl.isContextLost()) {
+      if (renderer && gl && !gl.isContextLost() && !useFallback) {
         // --- WebGL2 Rendering Path (scales to 50k nodes / 150k edges at 60fps) ---
         currentProjectedPoints = renderer.render(
           nodes,
@@ -170,13 +172,13 @@ export function MemoryGraph3D({
             }
           }
         }
-      } else if (fallbackCtx) {
-        // --- Canvas 2D Fallback Path (capped at 2,000 nodes) ---
+      } else if (labelsCtx) {
+        // --- Canvas 2D Fallback Path (capped at 2,000 nodes, rendered onto dedicated 2D overlay) ---
         const activeNodes = nodes.length > 2000 ? nodes.slice(0, 2000) : nodes;
         const activeNodeIds = new Set(activeNodes.map(n => n.id));
         const activeEdges = edges.filter(e => activeNodeIds.has(e.source) && activeNodeIds.has(e.target)).slice(0, 6000);
 
-        fallbackCtx.clearRect(0, 0, width, height);
+        labelsCtx.clearRect(0, 0, width, height);
         const projected = new Map(activeNodes.flatMap(node => {
           const p = coordinates.get(node.id);
           return p ? [[node.id, projectMemoryPoint(p, cameraRef.current, scale, width, height)] as const] : [];
@@ -190,20 +192,21 @@ export function MemoryGraph3D({
           }
         }
 
-        fallbackCtx.lineWidth = 0.55;
+        labelsCtx.lineWidth = 0.55;
         for (const edge of activeEdges) {
           const a = projected.get(edge.source), b = projected.get(edge.target);
           if (!a || !b) continue;
           const incident = edge.source === focus || edge.target === focus;
-          fallbackCtx.strokeStyle = incident ? "#98dafa" : focus ? "#14202b" : edge.type === "DERIVED_FROM" ? "#385068" : "#203343";
-          fallbackCtx.lineWidth = incident ? 1.15 : 0.55;
-          fallbackCtx.beginPath();
-          fallbackCtx.moveTo(a.x, a.y);
-          fallbackCtx.lineTo(b.x, b.y);
-          fallbackCtx.stroke();
+          labelsCtx.strokeStyle = incident ? "#98dafa" : focus ? "#14202b" : edge.type === "DERIVED_FROM" ? "#385068" : "#203343";
+          labelsCtx.lineWidth = incident ? 1.15 : 0.55;
+          labelsCtx.beginPath();
+          labelsCtx.moveTo(a.x, a.y);
+          labelsCtx.lineTo(b.x, b.y);
+          labelsCtx.stroke();
         }
 
         const fallbackPoints: ProjectedNodePoint[] = [];
+        // Draw farthest nodes first so foreground nodes render on top in 2D
         const ordered = activeNodes.filter(node => projected.has(node.id)).sort((a, b) => projected.get(b.id)!.z - projected.get(a.id)!.z);
         const labelBoxes: Array<{ x: number; y: number; w: number }> = [];
 
@@ -213,30 +216,30 @@ export function MemoryGraph3D({
           const root = node.type === "SOURCE" && isMemoryCoreLabel(node.label);
           const radius = Math.max(1, (root ? 10 : node.type === "SOURCE" ? 4.6 : 2.1) * p.perspective * Math.sqrt(cameraRef.current.zoom)) * (highlighted ? 1.5 : 1);
           fallbackPoints.push({ id: node.id, ...p, radius });
-          fallbackCtx.globalAlpha = focus && !highlighted && !neighbors.has(node.id) ? 0.2 : Math.max(0.4, Math.min(1, p.perspective));
-          fallbackCtx.fillStyle = highlighted ? "#ffffff" : positions.get(node.id)?.color ?? "#7395ad";
-          if (root || highlighted) { fallbackCtx.shadowColor = fallbackCtx.fillStyle; fallbackCtx.shadowBlur = 13; }
-          fallbackCtx.beginPath();
-          fallbackCtx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-          fallbackCtx.fill();
-          fallbackCtx.shadowBlur = 0;
+          labelsCtx.globalAlpha = focus && !highlighted && !neighbors.has(node.id) ? 0.2 : Math.max(0.4, Math.min(1, p.perspective));
+          labelsCtx.fillStyle = highlighted ? "#ffffff" : positions.get(node.id)?.color ?? "#7395ad";
+          if (root || highlighted) { labelsCtx.shadowColor = labelsCtx.fillStyle; labelsCtx.shadowBlur = 13; }
+          labelsCtx.beginPath();
+          labelsCtx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+          labelsCtx.fill();
+          labelsCtx.shadowBlur = 0;
         }
-        fallbackCtx.globalAlpha = 1;
+        labelsCtx.globalAlpha = 1;
 
         if (showTitles) {
           const labeled = [...ordered].sort((a, b) => Number(b.id === focus) - Number(a.id === focus) || Number(isMemoryCoreLabel(b.label)) - Number(isMemoryCoreLabel(a.label)) || Number(b.type === "SOURCE") - Number(a.type === "SOURCE"));
-          fallbackCtx.font = "11px system-ui, sans-serif";
+          labelsCtx.font = "11px system-ui, sans-serif";
           for (const node of labeled) {
             if (node.type !== "SOURCE" && node.id !== focus && cameraRef.current.zoom < 1.6) continue;
             const p = projected.get(node.id)!;
             const label = node.label.length > 48 ? `${node.label.slice(0, 45)}…` : node.label;
-            const x = p.x + 9, y = p.y, w = fallbackCtx.measureText(label).width;
+            const x = p.x + 9, y = p.y, w = labelsCtx.measureText(label).width;
             if (x + w > width || y < 14 || y > height - 5 || labelBoxes.some(box => Math.abs(box.y - y) < 16 && x < box.x + box.w + 5 && x + w + 5 > box.x)) continue;
             labelBoxes.push({ x, y, w });
-            fallbackCtx.fillStyle = "#09111bea";
-            fallbackCtx.fillRect(x - 3, y - 11, w + 6, 16);
-            fallbackCtx.fillStyle = isMemoryCoreLabel(node.label) ? "#fff0b0" : "#c6dfed";
-            fallbackCtx.fillText(label, x, y + 1);
+            labelsCtx.fillStyle = "#09111bea";
+            labelsCtx.fillRect(x - 3, y - 11, w + 6, 16);
+            labelsCtx.fillStyle = isMemoryCoreLabel(node.label) ? "#fff0b0" : "#c6dfed";
+            labelsCtx.fillText(label, x, y + 1);
           }
         }
 
@@ -271,9 +274,6 @@ export function MemoryGraph3D({
       labelsCanvas.height = Math.round(height * dpr);
       if (labelsCtx) {
         labelsCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      }
-      if (fallbackCtx) {
-        fallbackCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
       schedule();
     };

@@ -37,8 +37,8 @@ void main() {
   float screenX = uViewport.x * 0.5 + x1 * uScale * uZoom * perspective;
   float screenY = uViewport.y * 0.5 - y1 * uScale * uZoom * perspective;
 
-  float ndcX = (screenX / uViewport.x) * 2.0 - 1.0;
-  float ndcY = 1.0 - (screenY / uViewport.y) * 2.0;
+  // In our projection, smaller z1 is closer to the camera and larger z1 is farther.
+  // Smaller ndcZ passes gl.LEQUAL depth test, rendering foreground nodes in front.
   float ndcZ = clamp(z1 / 10000.0, -0.99, 0.99);
 
   gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);

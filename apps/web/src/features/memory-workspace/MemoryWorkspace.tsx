@@ -106,6 +106,12 @@ export function MemoryWorkspace({ shellMode, onClose, initialMode = "calendar" }
   }, []);
 
   const atlas = useMemo(() => createMemoryAtlas(graph?.data.nodes ?? [], graph?.data.edges ?? [], false), [graph]);
+  const desktop2DNodes = useMemo(() => atlas.nodes.length > 2000 ? atlas.nodes.slice(0, 2000) : atlas.nodes, [atlas.nodes]);
+  const desktop2DEdges = useMemo(() => {
+    if (atlas.nodes.length <= 2000) return atlas.edges;
+    const nodeSet = new Set(desktop2DNodes.map(n => n.id));
+    return atlas.edges.filter(e => nodeSet.has(e.source) && nodeSet.has(e.target));
+  }, [atlas.edges, desktop2DNodes]);
   const [layout, setLayout] = useState<{ atlas: typeof atlas; positions: Map<string, MemoryAtlasPosition>; depth: Map<string, MemoryPoint3D> } | null>(null);
   useEffect(() => {
     if (workspaceMode !== "atlas" || !atlas.nodes.length || typeof Worker === "undefined") return;
@@ -209,7 +215,7 @@ export function MemoryWorkspace({ shellMode, onClose, initialMode = "calendar" }
             <div className="memory-graph-layout" data-detail-open={Boolean(selectedNodeId)} data-graph-mode="ATLAS" data-source-count={atlas.nodes.filter(node => node.type === "SOURCE").length} data-source-link-count={atlas.edges.filter(edge => edge.type === "CONTAINS" || edge.type === "DERIVED_FROM").length} data-root-visible={atlas.nodes.some(node => node.type === "SOURCE" && isMemoryCoreLabel(node.label))} data-raw-node-count={graph?.data.nodes.length ?? 0} data-visible-node-count={atlas.nodes.length} data-visible-edge-count={atlas.edges.length}>
               <div className="memory-atlas-2d" hidden={view3D}><MemoryGraphErrorBoundary>
                 <Suspense fallback={<div className="memory-graph-loading" role="status">Connecting your memories…</div>}>
-                  <DesktopMemoryGraph nodes={atlas.nodes} edges={atlas.edges} displayMode="SEMANTIC" relationMode="RELATIONS" selectedNodeId={selectedNodeId} onSelectNode={selectNode} loading={loading || layoutPending} error={error} totalNodes={graph?.data.totalMatchingNodes ?? 0} totalEdges={graph?.data.totalMatchingEdges ?? 0} truncated={graph?.data.truncated ?? false} atlasPositions={atlasPositions} showTitles={showTitles} />
+                  <DesktopMemoryGraph nodes={desktop2DNodes} edges={desktop2DEdges} displayMode="SEMANTIC" relationMode="RELATIONS" selectedNodeId={selectedNodeId} onSelectNode={selectNode} loading={loading || layoutPending} error={error} totalNodes={graph?.data.totalMatchingNodes ?? 0} totalEdges={graph?.data.totalMatchingEdges ?? 0} truncated={graph?.data.truncated ?? false} atlasPositions={atlasPositions} showTitles={showTitles} />
                 </Suspense>
               </MemoryGraphErrorBoundary></div>
               {view3D ? <MemoryGraph3D nodes={atlas.nodes} edges={atlas.edges} positions={atlasPositions} coordinates={layout?.atlas === atlas ? layout.depth : new Map()} showTitles={showTitles} selectedNodeId={selectedNodeId} onSelectNode={selectNode} loading={loading || layoutPending} resetToken={reset3D} /> : null}

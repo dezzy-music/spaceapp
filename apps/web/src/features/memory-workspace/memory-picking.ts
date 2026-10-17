@@ -24,6 +24,8 @@ export class MemorySpatialIndex {
   private nextNode: Int32Array = new Int32Array(0);
   private points: ProjectedNodePoint[] = [];
 
+  private maxHitRadius = 7;
+
   build(points: ProjectedNodePoint[], width: number, height: number, cellSize: number = 32): void {
     this.points = points;
     this.width = Math.max(1, width);
@@ -31,6 +33,7 @@ export class MemorySpatialIndex {
     this.cellSize = cellSize;
     this.cols = Math.ceil(this.width / cellSize) + 2;
     this.rows = Math.ceil(this.height / cellSize) + 2;
+    this.maxHitRadius = 7;
     const totalCells = this.cols * this.rows;
 
     if (this.cellHead.length < totalCells) {
@@ -45,6 +48,8 @@ export class MemorySpatialIndex {
 
     for (let i = 0; i < n; i++) {
       const p = points[i]!;
+      const hr = Math.max(7, p.radius + 3);
+      if (hr > this.maxHitRadius) this.maxHitRadius = hr;
       const col = Math.floor(p.x / cellSize) + 1;
       const row = Math.floor(p.y / cellSize) + 1;
       if (col >= 0 && col < this.cols && row >= 0 && row < this.rows) {
@@ -61,14 +66,18 @@ export class MemorySpatialIndex {
     if (this.points.length === 0 || this.cols === 0) return null;
     const centerCol = Math.floor(x / this.cellSize) + 1;
     const centerRow = Math.floor(y / this.cellSize) + 1;
+    const span = Math.max(1, Math.ceil(this.maxHitRadius / this.cellSize));
 
     let bestId: string | null = null;
-    let bestZ = -Infinity;
+    let bestZ = Infinity;
 
-    for (let r = centerRow - 1; r <= centerRow + 1; r++) {
-      if (r < 0 || r >= this.rows) continue;
-      for (let c = centerCol - 1; c <= centerCol + 1; c++) {
-        if (c < 0 || c >= this.cols) continue;
+    const minR = Math.max(0, centerRow - span);
+    const maxR = Math.min(this.rows - 1, centerRow + span);
+    const minC = Math.max(0, centerCol - span);
+    const maxC = Math.min(this.cols - 1, centerCol + span);
+
+    for (let r = minR; r <= maxR; r++) {
+      for (let c = minC; c <= maxC; c++) {
         const cellIndex = r * this.cols + c;
         let curr = this.cellHead[cellIndex]!;
         while (curr !== -1) {
@@ -77,7 +86,8 @@ export class MemorySpatialIndex {
           const dx = p.x - x;
           const dy = p.y - y;
           if (dx * dx + dy * dy < hitRadius * hitRadius) {
-            if (p.z > bestZ) {
+            // Smaller z is closer to camera in our projection pipeline
+            if (p.z < bestZ) {
               bestZ = p.z;
               bestId = p.id;
             }

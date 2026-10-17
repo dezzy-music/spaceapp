@@ -675,6 +675,7 @@ export class DemoStore {
   }
 
   private memoryGraph(query: DemoMemoryGraphQuery = {}): MemoryGraphPayload {
+    const needle = query.q?.trim().toLowerCase();
     const targetBenchmark = query.benchmarkSize ?? (query.limit && query.limit > 2000 ? query.limit : undefined);
     if (targetBenchmark) {
       let cached = this.syntheticGraphCache.get(targetBenchmark);
@@ -682,11 +683,23 @@ export class DemoStore {
         cached = generateSyntheticMemoryGraph(targetBenchmark);
         this.syntheticGraphCache.set(targetBenchmark, cached);
       }
-      return cached;
+      if (!needle) return cached;
+      const filteredNodes = cached.nodes.filter(n => n.label.toLowerCase().includes(needle) || (n.sourcePath?.toLowerCase().includes(needle) ?? false));
+      const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+      const filteredEdges = cached.edges.filter(e => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target));
+      return {
+        ...cached,
+        nodes: filteredNodes,
+        edges: filteredEdges,
+        summary: {
+          ...cached.summary,
+          nodeCount: filteredNodes.length,
+          edgeCount: filteredEdges.length
+        }
+      };
     }
 
     const base = this.fixture.memoryWorkspace.graph;
-    const needle = query.q?.trim().toLowerCase();
     const nodes = base.nodes.filter((node) => {
       const record = node.recordId ? this.fixture.memoryWorkspace.nodeDetails[node.id]?.record : null;
       const expectedMonthPath = query.month && query.month !== "all"

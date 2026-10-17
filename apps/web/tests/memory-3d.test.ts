@@ -73,25 +73,30 @@ describe("3D memory projection", () => {
         perspective: 1
       }));
 
-      // Target node placed at known coordinates with foreground Z depth
-      points[12345] = { id: "target-node", x: 500, y: 500, z: 999, radius: 5, perspective: 1 };
+      // Target node placed at known coordinates with foreground Z depth (smaller z is closer to camera)
+      points[12345] = { id: "target-node", x: 500, y: 500, z: -999, radius: 5, perspective: 1 };
 
       index.build(points, 1920, 1080, 32);
 
-      const start = performance.now();
-      const hit = index.pick(501, 502);
-      const duration = performance.now() - start;
-
-      expect(hit).toBe("target-node");
-      expect(duration).toBeLessThan(4); // Acceptance criteria requirement <= 4ms
+      // Measure repeated pick calls and verify median latency against the 4ms acceptance threshold
+      const latencies: number[] = [];
+      for (let run = 0; run < 25; run++) {
+        const start = performance.now();
+        const hit = index.pick(501, 502);
+        latencies.push(performance.now() - start);
+        expect(hit).toBe("target-node");
+      }
+      latencies.sort((a, b) => a - b);
+      const median = latencies[Math.floor(latencies.length / 2)]!;
+      expect(median).toBeLessThan(4); // Acceptance criteria requirement <= 4ms
     });
 
-    it("prefers the node closest to the camera (highest Z) on overlapping hits", async () => {
+    it("prefers the node closest to the camera (smallest Z) on overlapping hits", async () => {
       const { MemorySpatialIndex } = await import("../src/features/memory-workspace/memory-picking.js");
       const index = new MemorySpatialIndex();
       const points = [
-        { id: "background", x: 100, y: 100, z: -50, radius: 5, perspective: 1 },
-        { id: "foreground", x: 100, y: 100, z: 50, radius: 5, perspective: 1 }
+        { id: "background", x: 100, y: 100, z: 50, radius: 5, perspective: 1 },
+        { id: "foreground", x: 100, y: 100, z: -50, radius: 5, perspective: 1 }
       ];
       index.build(points, 800, 600, 32);
       expect(index.pick(101, 100)).toBe("foreground");

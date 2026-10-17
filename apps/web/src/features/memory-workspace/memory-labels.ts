@@ -58,9 +58,9 @@ export function selectBoundedLabels(
     }
   }
 
-  // Sort sources and others by closeness to camera (higher z)
-  sourceNodes.sort((a, b) => b.point.z - a.point.z);
-  otherNodes.sort((a, b) => b.point.z - a.point.z);
+  // Sort sources and others by closeness to camera (smaller z is closer)
+  sourceNodes.sort((a, b) => a.point.z - b.point.z);
+  otherNodes.sort((a, b) => a.point.z - b.point.z);
 
   const candidates: LabelCandidate[] = [];
   if (focusNode && focusPoint) {
