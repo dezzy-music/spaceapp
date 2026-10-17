@@ -182,9 +182,9 @@ export function MemoryWorkspace({ shellMode, onClose, initialMode = "calendar" }
                 <>
                   <button type="button" aria-label="Reset 3D memory view" onClick={() => setReset3D(value => value + 1)}>↺</button>
                   <div className="memory-workspace-mode-selector" role="group" aria-label="Benchmark graph size">
-                    <button type="button" className={`memory-mode-pill ${graphLimit === 2000 ? "is-active" : ""}`} onClick={() => setGraphLimit(2000)}>2k</button>
-                    <button type="button" className={`memory-mode-pill ${graphLimit === 10000 ? "is-active" : ""}`} onClick={() => setGraphLimit(10000)}>10k</button>
-                    <button type="button" className={`memory-mode-pill ${graphLimit === 50000 ? "is-active" : ""}`} onClick={() => setGraphLimit(50000)}>50k</button>
+                    <button type="button" aria-pressed={graphLimit === 2000} className={`memory-mode-pill ${graphLimit === 2000 ? "is-active" : ""}`} onClick={() => setGraphLimit(2000)}>2k</button>
+                    <button type="button" aria-pressed={graphLimit === 10000} className={`memory-mode-pill ${graphLimit === 10000 ? "is-active" : ""}`} onClick={() => setGraphLimit(10000)}>10k</button>
+                    <button type="button" aria-pressed={graphLimit === 50000} className={`memory-mode-pill ${graphLimit === 50000 ? "is-active" : ""}`} onClick={() => setGraphLimit(50000)}>50k</button>
                   </div>
                 </>
               ) : null}
