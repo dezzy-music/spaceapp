@@ -23,6 +23,14 @@ export function MemoryWorkspace({ shellMode, onClose, initialMode = "calendar" }
   const [view3D, setView3D] = useState(false);
   const [showTitles, setShowTitles] = useState(true);
   const [reset3D, setReset3D] = useState(0);
+  const [graphLimit, setGraphLimit] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search).get("benchmark");
+      if (p === "50k" || p === "50000") return 50000;
+      if (p === "10k" || p === "10000") return 10000;
+    }
+    return 2000;
+  });
   const [queryDraft, setQueryDraft] = useState("");
   const [query, setQuery] = useState("");
   const [graph, setGraph] = useState<MemoryGraphOverviewResponse | null>(null);
@@ -71,13 +79,18 @@ export function MemoryWorkspace({ shellMode, onClose, initialMode = "calendar" }
     setLoading(true);
     setError(null);
     closeDetail();
-    // Search covers the entire archive; removing the month picker must not hide old memories.
-    void api.memoryGraphOverview({ q: query || undefined, month: "all", relationMode: "RELATIONS" })
+    // Search covers the entire archive; pass limit for 3D view scaling
+    void api.memoryGraphOverview({
+      q: query || undefined,
+      month: "all",
+      relationMode: "RELATIONS",
+      ...(view3D && graphLimit !== 2000 ? { limit: graphLimit } : {})
+    })
       .then(payload => { if (active) setGraph(payload); })
       .catch(caught => { if (active) setError(caught instanceof Error ? caught.message : "Memory could not be loaded."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [workspaceMode, query, closeDetail]);
+  }, [workspaceMode, query, closeDetail, view3D, graphLimit]);
 
   useEffect(() => () => { detailRequest.current++; }, []);
   const selectNode = useCallback((nodeId: string) => {
@@ -97,10 +110,20 @@ export function MemoryWorkspace({ shellMode, onClose, initialMode = "calendar" }
   useEffect(() => {
     if (workspaceMode !== "atlas" || !atlas.nodes.length || typeof Worker === "undefined") return;
     const worker = new Worker(new URL("./memory-network-layout.worker.ts", import.meta.url), { type: "module" });
-    worker.onmessage = (event: MessageEvent<{ positions: Array<[string, { x: number; y: number }]>; depth: Array<[string, MemoryPoint3D]> }>) => {
+    worker.onmessage = (event: MessageEvent<{
+      positions: Array<[string, { x: number; y: number }]>;
+      depth: Array<[string, MemoryPoint3D]>;
+      done?: boolean;
+    }>) => {
       const coordinates = new Map(event.data.positions);
-      setLayout({ atlas, depth: new Map(event.data.depth), positions: new Map([...atlas.positions].map(([id, position]) => [id, { ...position, ...coordinates.get(id) }])) });
-      worker.terminate();
+      setLayout({
+        atlas,
+        depth: new Map(event.data.depth),
+        positions: new Map([...atlas.positions].map(([id, position]) => [id, { ...position, ...coordinates.get(id) }]))
+      });
+      if (event.data.done !== false) {
+        worker.terminate();
+      }
     };
     worker.onerror = event => { setError(`Memory layout could not be calculated: ${event.message || "worker unavailable"}`); worker.terminate(); };
     worker.postMessage({ nodes: atlas.nodes, edges: atlas.edges });
@@ -149,7 +172,16 @@ export function MemoryWorkspace({ shellMode, onClose, initialMode = "calendar" }
             <div className="memory-atlas-view-controls" aria-label="Memory view controls">
               <button type="button" aria-label="Toggle 3D memory view" aria-pressed={view3D} onClick={() => setView3D(value => !value)}><span aria-hidden="true">◇</span> {view3D ? "2D" : "3D"}</button>
               <button type="button" aria-label="Toggle memory titles" aria-pressed={showTitles} onClick={() => setShowTitles(value => !value)}>Aa <span>Titles</span></button>
-              {view3D ? <button type="button" aria-label="Reset 3D memory view" onClick={() => setReset3D(value => value + 1)}>↺</button> : null}
+              {view3D ? (
+                <>
+                  <button type="button" aria-label="Reset 3D memory view" onClick={() => setReset3D(value => value + 1)}>↺</button>
+                  <div className="memory-workspace-mode-selector" role="group" aria-label="Benchmark graph size">
+                    <button type="button" className={`memory-mode-pill ${graphLimit === 2000 ? "is-active" : ""}`} onClick={() => setGraphLimit(2000)}>2k</button>
+                    <button type="button" className={`memory-mode-pill ${graphLimit === 10000 ? "is-active" : ""}`} onClick={() => setGraphLimit(10000)}>10k</button>
+                    <button type="button" className={`memory-mode-pill ${graphLimit === 50000 ? "is-active" : ""}`} onClick={() => setGraphLimit(50000)}>50k</button>
+                  </div>
+                </>
+              ) : null}
             </div>
           ) : null}
           <button type="button" className="icon-button memory-atlas-close" aria-label="Close memory workspace" onClick={onClose}><X aria-hidden="true" /></button>

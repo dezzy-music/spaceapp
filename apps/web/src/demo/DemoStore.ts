@@ -1,5 +1,6 @@
 import { taskTitleSettingsSchema, shortTaskTitle, roomSchema, paneSchema, userSettingsSchema, userLinkSchema, clipboardItemSchema, taskItemSchema, taskScheduleNextRunAt, artifactSchema, MAX_ROOMS, pickNextAvailableRoomName } from "@space/contracts";
 import { demoHealthSnapshot } from "./demo-health.js";
+import { generateSyntheticMemoryGraph } from "./synthetic-memory-graph.js";
 import { defaultUserSettings, canonicalizeUserLinkUrl, cliToggleRuntimeIds, streamingMetricDefinitions, defaultToolRoutingState, buildEffectiveToolPlan, updateToolRoutingSchema, buildDotToolCatalog, dotWorkspacePath, dotUserSettingsFrom, summarizeDotProactiveUsage } from "@space/contracts";
 import type { DotUserSettings, UpdateDotUserSettings } from "@space/contracts";
 import type {
@@ -148,6 +149,8 @@ type DemoMemoryGraphQuery = {
   relationMode?: "CLUSTERED" | "RELATIONS";
   page?: number;
   pageSize?: number;
+  limit?: number;
+  benchmarkSize?: number;
 };
 
 function memoryChangeSetSummary(changeSet: MemoryChangeSet): MemoryChangeSetSummary {
@@ -202,6 +205,8 @@ function initialSetupConnectionResults(): Map<string, DemoSetupConnectionResult>
   ]));
 }
 
+export { generateSyntheticMemoryGraph } from "./synthetic-memory-graph.js";
+
 export class DemoStore {
   private fixture = cloneFixture();
   private sequence = 0;
@@ -222,6 +227,7 @@ export class DemoStore {
   private taskTitlePolicy = taskTitleSettingsSchema.parse({});
   private streamingBotSettings = initialStreamingBotSettings();
   private streamingBotStatus = initialStreamingBotStatus();
+  private syntheticGraphCache = new Map<number, MemoryGraphPayload>();
   readonly api: SpaceApiClient;
   private mockServices = new MockServices(() => this.fixture);
   private readonly publicMock: boolean;
@@ -669,6 +675,16 @@ export class DemoStore {
   }
 
   private memoryGraph(query: DemoMemoryGraphQuery = {}): MemoryGraphPayload {
+    const targetBenchmark = query.benchmarkSize ?? (query.limit && query.limit > 2000 ? query.limit : undefined);
+    if (targetBenchmark) {
+      let cached = this.syntheticGraphCache.get(targetBenchmark);
+      if (!cached) {
+        cached = generateSyntheticMemoryGraph(targetBenchmark);
+        this.syntheticGraphCache.set(targetBenchmark, cached);
+      }
+      return cached;
+    }
+
     const base = this.fixture.memoryWorkspace.graph;
     const needle = query.q?.trim().toLowerCase();
     const nodes = base.nodes.filter((node) => {
