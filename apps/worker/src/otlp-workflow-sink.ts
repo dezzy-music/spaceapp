@@ -13,7 +13,7 @@ export interface OtlpWorkflowSpanPayload {
   name: string;
   kind?: number;
   startTimeUnixNano: string;
-  endTimeUnixNano: string;
+  endTimeUnixNano?: string;
   attributes: Record<string, string | number>;
   error: boolean;
   links?: Array<{
@@ -35,6 +35,9 @@ export interface OtlpWorkflowSinks extends Sinks {
  * Creates Temporal worker sinks for OTLP workflow span export.
  * `callDuringReplay: false` guarantees that Temporal will NEVER invoke the sink
  * during history replay, ensuring determinism and zero duplicate spans.
+ *
+ * Real end-time timestamping and duration calculations are performed here
+ * in the worker process (outside the sandbox) to avoid Temporal workflow-task clock drift.
  */
 export function createOtlpWorkflowSinks(spanExporter: SpanExporter | null): InjectedSinks<OtlpWorkflowSinks> {
   return {
@@ -43,15 +46,24 @@ export function createOtlpWorkflowSinks(spanExporter: SpanExporter | null): Inje
         fn: (_info: WorkflowInfo, payload: OtlpWorkflowSpanPayload) => {
           if (!spanExporter) return;
           try {
+            const nowNano = BigInt(Date.now()) * 1_000_000n;
+            const startTimeUnixNano = BigInt(payload.startTimeUnixNano);
+            const rawEnd = payload.endTimeUnixNano ? BigInt(payload.endTimeUnixNano) : nowNano;
+            const endTimeUnixNano = rawEnd >= startTimeUnixNano ? rawEnd : startTimeUnixNano;
+            const durationMs = Math.max(0, Number((endTimeUnixNano - startTimeUnixNano) / 1_000_000n));
+            const attributes = {
+              ...payload.attributes,
+              "space.duration_ms": durationMs
+            };
             const span: ServerSpan = {
               traceId: payload.traceId,
               spanId: payload.spanId,
               parentSpanId: payload.parentSpanId,
               name: payload.name,
               kind: payload.kind ?? 1,
-              startTimeUnixNano: BigInt(payload.startTimeUnixNano),
-              endTimeUnixNano: BigInt(payload.endTimeUnixNano),
-              attributes: payload.attributes,
+              startTimeUnixNano,
+              endTimeUnixNano,
+              attributes,
               error: payload.error,
               links: payload.links?.map(link => ({
                 traceId: link.traceId,

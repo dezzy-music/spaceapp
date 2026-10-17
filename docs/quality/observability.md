@@ -233,8 +233,10 @@ workers share the same exporter (services `space-api`, `space-worker`,
   parented to the inbound `traceparent` span ID. Child workflows (e.g. `memoryMaintenanceWorkflow`
   → `memoryConsolidationWorkflow`) nest under their parent workflow span. Spans leave the
   sandbox strictly via Temporal interceptors and sinks with `callDuringReplay: false`,
-  preserving workflow replay determinism. Continue-as-new and background continuations attach
-  OTLP span links (`link.reason: continue_as_new` or `room_background_continuation`).
+  preserving workflow replay determinism. Real end time and duration are stamped in the
+  worker sink handler outside the Temporal sandbox to avoid workflow-task clock drift.
+  Continue-as-new and background continuations attach OTLP span links (`link.reason: continue_as_new`
+  or `room_background_continuation`).
 - **Worker activities:** each activity attempt emits an INTERNAL span named `activity <type>`,
   parented to the enclosing workflow span, with attempt number, duration, outcome, and stable
   reasonCode/category.

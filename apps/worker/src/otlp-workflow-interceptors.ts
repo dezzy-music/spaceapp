@@ -159,17 +159,12 @@ export class OtlpWorkflowInboundInterceptor implements WorkflowInboundCallsInter
       error = true;
       throw err;
     } finally {
-      const endTimeMs = Date.now();
-      const endTimeUnixNano = `${endTimeMs}000000`;
-      const durationMs = Math.max(0, endTimeMs - startTimeMs);
-
       const rawAttrs: Record<string, unknown> = {
         "service.name": "space-worker",
         "temporal.workflow_type": info.workflowType,
         "temporal.workflow_id": info.workflowId,
         "temporal.run_id": info.runId,
         "space.workflow_type": info.workflowType,
-        "space.duration_ms": durationMs,
         "space.outcome": error ? "FAILED" : "COMPLETED"
       };
       if (info.parent) {
@@ -189,7 +184,6 @@ export class OtlpWorkflowInboundInterceptor implements WorkflowInboundCallsInter
             name: `workflow ${info.workflowType}`,
             kind: 1, // INTERNAL
             startTimeUnixNano,
-            endTimeUnixNano,
             attributes: safeAttributes,
             error,
             ...(links.length > 0 ? { links } : {})
