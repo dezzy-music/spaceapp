@@ -704,7 +704,13 @@ export function renderWorkspaceCompose(config, { cliSandbox = false } = {}) {
     "      - type: bind",
     `        source: ${JSON.stringify(workspace.hostPath)}`,
     `        target: ${JSON.stringify(workspace.containerPath)}`,
-    `        read_only: ${workspace.readOnly}`
+    `        read_only: ${workspace.readOnly}`,
+    ...(isPodman
+      ? [
+          "        bind:",
+          '          selinux: "z"'
+        ]
+      : [])
   ];
   const userServices = users.flatMap((user) => {
     const slug = userSlug(user.id);
@@ -758,6 +764,7 @@ export function renderWorkspaceCompose(config, { cliSandbox = false } = {}) {
 
 export function renderPodmanCompose(config = { engine: "podman" }) {
   if (config && config.engine !== "podman") return "";
+  const users = config.users ?? [];
   return [
     "services:",
     "  spaceapp-core:",
@@ -766,6 +773,10 @@ export function renderPodmanCompose(config = { engine: "podman" }) {
     '    userns_mode: "keep-id:uid=10001,gid=10001"',
     "  spaceapp-browser:",
     '    userns_mode: "keep-id:uid=10001,gid=10001"',
+    ...users.flatMap((user) => [
+      `  spaceapp-cli-${userSlug(user.id)}:`,
+      '    userns_mode: "keep-id:uid=10001,gid=10001"'
+    ]),
     ""
   ].join("\n");
 }

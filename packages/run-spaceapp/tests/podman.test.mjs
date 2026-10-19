@@ -90,6 +90,10 @@ test("renderPodmanCompose generates keep-id userns_mode for unprivileged rootles
   assert.match(composeYaml, /spaceapp-core:/);
   assert.match(composeYaml, /spaceapp-cli:/);
   assert.match(composeYaml, /spaceapp-browser:/);
+
+  const multiUserYaml = renderPodmanCompose({ engine: "podman", users: [{ id: "user:alice" }] });
+  assert.match(multiUserYaml, /spaceapp-cli-alice-[a-f0-9]{6}:/);
+  assert.match(multiUserYaml, /userns_mode:\s*"keep-id:uid=10001,gid=10001"/);
 });
 
 test("renderWorkspaceCompose injects SELinux relabeling (:z) when engine is podman", () => {
